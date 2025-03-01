@@ -493,34 +493,45 @@ class BatchedAgentManager(object):
         self._get_initial_states()
         return self._get_env_shapes()
 
+
     def cleanup(self):
         """
-        Clean up resources and terminate processes.
+        Clean up resources and terminate processes using threading for faster execution.
         """
-        import traceback
+        threads = []
 
         for proc_id, proc_package in enumerate(self.processes):
-            process, parent_end, child_endpoint, shm_view = proc_package
+            thread = threading.Thread(target=self._cleanup, args=(proc_id, proc_package))
+            threads.append(thread)
+            thread.start()
 
-            try:
-                parent_end.sendto(
-                    comm_consts.pack_message(comm_consts.STOP_MESSAGE_HEADER),
-                    child_endpoint,
-                )
-            except Exception:
-                print("Unable to join process")
-                traceback.print_exc()
-                print("Failed to send stop signal to child process!")
-                traceback.print_exc()
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
 
-            try:
-                process.join()
-            except Exception:
-                print("Unable to join process")
-                traceback.print_exc()
+    def _cleanup(self, proc_id, proc_package):
+        """
+        Clean up resources and terminate a specific process.
+        """
+        process, parent_end, child_endpoint, shm_view = proc_package
 
-            try:
-                parent_end.close()
-            except Exception:
-                print("Unable to close parent connection")
-                traceback.print_exc()
+        try:
+            parent_end.sendto(
+                comm_consts.pack_message(comm_consts.STOP_MESSAGE_HEADER),
+                child_endpoint,
+            )
+        except Exception:
+            print(f"Process {proc_id}: Unable to send stop signal to child process!")
+            traceback.print_exc()
+
+        try:
+            process.join()
+        except Exception:
+            print(f"Process {proc_id}: Unable to join process")
+            traceback.print_exc()
+
+        try:
+            parent_end.close()
+        except Exception:
+            print(f"Process {proc_id}: Unable to close parent connection")
+            traceback.print_exc()
